@@ -162,3 +162,9 @@ def test_standings_show_all_participants_before_any_results(client, app):
     for row in resp.json:
         assert row["played"] == 0
         assert row["points"] == 0
+
+def test_standings_include_player_id_for_linking(client, app):
+    token, tid, match_id, pids = setup_two_player_match(client, app, "linkcheck@example.com")
+    resp = client.get(f"/api/v1/tournaments/{tid}/standings")
+    assert resp.status_code == 200
+    assert all("player_id" in row for row in resp.json)

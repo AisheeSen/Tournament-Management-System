@@ -40,7 +40,14 @@ export default function PlayerDashboardPage() {
           <h1 className="text-3xl text-text-primary">Hello, {user?.name}</h1>
           <p className="text-text-secondary mt-2">
             Your tournaments, upcoming and past.
-            {user?.team_name && ` · Team: ${user.team_name}`}
+            {user?.team_name && (
+              <>
+                {' · Team: '}
+                <Link to={`/teams/${user.team_id}/roster`} className="underline hover:opacity-80">
+                  {user.team_name}
+                </Link>
+              </>
+            )}
           </p>
         </div>
         <div className="flex gap-3">

@@ -20,6 +20,8 @@ def get_standings(tournament_id):
     for standing, total_score, name in rows:
         payload.append(standing_schema.dump({
             "participant_id": standing.participant_id,
+            "player_id": standing.participant.player_id,
+            "team_id": standing.participant.team_id,
             "name": name,
             "played": standing.played,
             "won": standing.won,

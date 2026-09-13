@@ -8,6 +8,7 @@ import EmptyState from '../components/common/EmptyState';
 import { getTeam } from '../api/teamApi';
 import { listPlayers } from '../api/playerApi';
 import { getErrorMessage } from '../utils/errorMessage';
+import { Link } from 'react-router-dom';
 
 export default function TeamRosterPage() {
   const { id } = useParams();
@@ -62,9 +63,13 @@ export default function TeamRosterPage() {
         ) : (
           <div className="flex flex-col gap-2">
             {members.map((m) => (
-              <div key={m.id} className="bg-bg-primary rounded-xl px-4 py-2 text-text-primary">
+              <Link
+                key={m.id}
+                to={`/players/${m.id}/profile`}
+                className="bg-bg-primary rounded-xl px-4 py-2 text-text-primary hover:opacity-90 block"
+              >
                 {m.name}
-              </div>
+              </Link>
             ))}
           </div>
         )}

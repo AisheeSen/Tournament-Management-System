@@ -8,6 +8,7 @@ import { updatePlayerTeam } from '../api/playerApi';
 import { listTeams } from '../api/teamApi';
 import { getErrorMessage } from '../utils/errorMessage';
 import { useAuth } from '../hooks/useAuth';
+import { Link } from 'react-router-dom';
 
 export default function PlayerTeamSettingsPage() {
   const { user } = useAuth();
@@ -76,9 +77,15 @@ export default function PlayerTeamSettingsPage() {
       <Card className="max-w-md">
         <h1 className="text-2xl text-text-primary mb-2">Team Settings</h1>
         <p className="text-text-secondary text-sm mb-6">
-          Current team: {user?.team_name || 'None'}
+          Current team:{' '}
+          {user?.team_name ? (
+            <Link to={`/teams/${user.team_id}/roster`} className="underline hover:opacity-80">
+              {user.team_name}
+            </Link>
+          ) : (
+            'None'
+          )}
         </p>
-
         <ErrorBanner message={error} />
         {success && <p className="text-text-primary mb-4">{success}</p>}
 

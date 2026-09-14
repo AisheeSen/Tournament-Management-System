@@ -138,3 +138,60 @@ def test_player_profile_shows_achievement_after_winning(client, app):
     assert resp.status_code == 200
     assert len(resp.json["achievements"]) == 1
     assert resp.json["achievements"][0]["tournament_name"] == "Achievement Test"
+
+def test_achievement_includes_participant_type_and_team_name(client, app):
+    from app.models import Player, Team
+    from app.extensions import db
+
+    org_token = register_and_login(client, "teamachieve@example.com")
+    tournament = client.post(
+        "/api/v1/tournaments",
+        json={"name": "Team Achievement Test", "sport": "Football", "format": "ROUND_ROBIN", "participant_type": "TEAM"},
+        headers=auth_headers(org_token),
+    ).json
+    client.post(f"/api/v1/tournaments/{tournament['id']}/open-registration", headers=auth_headers(org_token))
+
+    with app.app_context():
+        team_a = Team(name="Falcons")
+        team_b = Team(name="Ravens")
+        db.session.add_all([team_a, team_b])
+        db.session.commit()
+        team_a_id, team_b_id = team_a.id, team_b.id
+        p1 = Player(name="P1", team_id=team_a_id)
+        db.session.add(p1)
+        db.session.commit()
+        p1_id = p1.id
+
+    client.post(f"/api/v1/tournaments/{tournament['id']}/participants", json={"team_id": team_a_id}, headers=auth_headers(org_token))
+    client.post(f"/api/v1/tournaments/{tournament['id']}/participants", json={"team_id": team_b_id}, headers=auth_headers(org_token))
+    client.post(f"/api/v1/tournaments/{tournament['id']}/start", headers=auth_headers(org_token))
+    matches = client.post(f"/api/v1/tournaments/{tournament['id']}/fixtures", headers=auth_headers(org_token)).json
+    match = matches[0]
+    participant_ids = [p["id"] for p in match["participants"]]
+
+    venue_resp = client.post("/api/v1/venues", json={"name": "TA Venue", "location": "L"}, headers=auth_headers(org_token))
+    client.put(
+        f"/api/v1/matches/{match['id']}/schedule",
+        json={"venue_id": venue_resp.json["id"], "scheduled_at": "2030-01-01T10:00:00+00:00"},
+        headers=auth_headers(org_token),
+    )
+    winner_pid = next(p["id"] for p in match["participants"] if p["team_id"] == team_a_id)
+    loser_pid = next(p["id"] for p in match["participants"] if p["team_id"] == team_b_id)
+    client.post(
+        f"/api/v1/matches/{match['id']}/result",
+        json={
+            "result_type": "WIN",
+            "winner_participant_id": winner_pid,
+            "scores": [
+                {"participant_id": winner_pid, "score": 2},
+                {"participant_id": loser_pid, "score": 0},
+            ],
+        },
+        headers=auth_headers(org_token),
+    )
+
+    resp = client.get(f"/api/v1/players/{p1_id}/profile")
+    assert resp.status_code == 200
+    achievement = resp.json["achievements"][0]
+    assert achievement["participant_type"] == "TEAM"
+    assert achievement["team_name"] == "Falcons"

@@ -247,11 +247,20 @@ def get_player_achievements(player_id: int) -> list:
                         winner_participant_id = result.winner_participant_id
 
         if winner_participant_id in my_participant_ids:
+            winning_participant = db.session.get(Participant, winner_participant_id)
+            team_name = None
+            if winning_participant and winning_participant.team_id:
+                from app.models import Team
+                team = db.session.get(Team, winning_participant.team_id)
+                team_name = team.name if team else None
+
             achievements.append({
                 "tournament_id": tournament.id,
                 "tournament_name": tournament.name,
                 "sport": tournament.sport,
                 "format": tournament.format.value,
+                "participant_type": tournament.participant_type.value,
+                "team_name": team_name,
             })
 
     return achievements

@@ -72,7 +72,10 @@ export default function PlayerProfilePage() {
               >
                 <div>
                   <p className="text-text-primary font-semibold">{a.tournament_name}</p>
-                  <p className="text-text-secondary text-xs">{a.sport} · {a.format.replace('_', ' ')}</p>
+ 		  <p className="text-text-secondary text-xs">
+   		     {a.sport} · {a.format.replace('_', ' ')} · {a.participant_type}
+    		     {a.team_name && ` · ${a.team_name}`}
+  		  </p>
                 </div>
                 <span className="text-accent">Winner</span>
               </Link>

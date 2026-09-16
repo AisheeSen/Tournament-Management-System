@@ -3,6 +3,34 @@ from app.models import Participant, TournamentParticipant, Player, Team
 from app.constants.enums import ParticipationType, TournamentStatus
 from app.services.tournament_service import get_tournament_or_404, TournamentError
 
+def _compute_tournament_winner_participant_id(tournament):
+    from app.models import Match, MatchResult
+    from app.constants.enums import TournamentFormat
+
+    if tournament.format == TournamentFormat.ROUND_ROBIN:
+        from app.services.standings_service import list_standings
+        standings = list_standings(tournament.id)
+        if standings:
+            return standings[0][0].participant_id
+        return None
+
+    import re
+    matches = Match.query.filter_by(tournament_id=tournament.id).all()
+    if not matches:
+        return None
+
+    def round_num(m):
+        mo = re.match(r"Round (\d+)", m.round)
+        return int(mo.group(1)) if mo else 0
+
+    final_round = max(round_num(m) for m in matches)
+    final_matches = [m for m in matches if round_num(m) == final_round]
+    if final_matches:
+        result = MatchResult.query.filter_by(match_id=final_matches[0].id).first()
+        if result:
+            return result.winner_participant_id
+    return None
+
 def get_participant_display(participant) -> dict:
     if participant is None:
         return {"id": None, "type": None, "name": None, "player_id": None, "team_id": None}
@@ -95,6 +123,17 @@ def register_participant(tournament_id: int, requester_user_id: int, requester_r
 
     registration = TournamentParticipant(tournament_id=tournament_id, participant_id=participant.id)
     db.session.add(registration)
+    db.session.flush()  # get registration.id before snapshotting members
+
+    if participant_type == ParticipationType.TEAM:
+        from app.models import Player, TournamentParticipantMember
+        current_roster = Player.query.filter_by(team_id=team_id).all()
+        for member_player in current_roster:
+            db.session.add(TournamentParticipantMember(
+                tournament_participant_id=registration.id,
+                player_id=member_player.id,
+            ))
+
     db.session.commit()
     return registration
 
@@ -182,85 +221,102 @@ def list_my_tournaments(user_id: int):
 
     return {"upcoming": upcoming, "past": past}
 
-def get_player_achievements(player_id: int) -> list:
-    """Returns tournaments this player won, either individually or as part of
-    the team they currently belong to. Team-based wins are matched against the
-    player's *current* team — if a player has since left the winning team,
-    this won't retroactively credit them, and vice versa if they've joined a
-    team that won before they joined. This is a known simplification: the
-    system doesn't track historical team rosters."""
-    from app.models import Tournament, Player, MatchResult, Match
-    from app.constants.enums import TournamentStatus, TournamentFormat
+def get_player_achievements(player_id: int) -> dict:
+    """Returns {"individual": [...], "current_team": [...], "previous_team": [...]}.
+    Team achievements are attributed only to tournaments the player actually had a
+    roster-snapshot record for (see TournamentParticipantMember) — never to a team's
+    wins the player wasn't actually part of at registration time."""
+    from app.models import Tournament, Player, TournamentParticipant, TournamentParticipantMember, Team
+    from app.constants.enums import TournamentStatus
 
     player = db.session.get(Player, player_id)
     if not player:
-        return []
+        return {"individual": [], "current_team": [], "previous_team": []}
 
-    my_participant_ids = set()
+    individual_achievements = []
+    current_team_achievements = []
+    previous_team_achievements = []
 
-    individual = Participant.query.filter_by(
+    individual_participant = Participant.query.filter_by(
         type=ParticipationType.INDIVIDUAL, player_id=player_id
     ).first()
-    if individual:
-        my_participant_ids.add(individual.id)
+    if individual_participant:
+        registrations = TournamentParticipant.query.filter_by(
+            participant_id=individual_participant.id
+        ).all()
+        for reg in registrations:
+            tournament = db.session.get(Tournament, reg.tournament_id)
+            if not tournament or tournament.status != TournamentStatus.COMPLETED:
+                continue
+            winner_id = _compute_tournament_winner_participant_id(tournament)
+            if winner_id == individual_participant.id:
+                individual_achievements.append({
+                    "tournament_id": tournament.id,
+                    "tournament_name": tournament.name,
+                    "sport": tournament.sport,
+                    "format": tournament.format.value,
+                })
 
-    if player.team_id:
-        team_participant = Participant.query.filter_by(
-            type=ParticipationType.TEAM, team_id=player.team_id
-        ).first()
-        if team_participant:
-            my_participant_ids.add(team_participant.id)
+    member_rows = TournamentParticipantMember.query.filter_by(player_id=player_id).all()
+    for member in member_rows:
+        reg = db.session.get(TournamentParticipant, member.tournament_participant_id)
+        if not reg:
+            continue
+        tournament = db.session.get(Tournament, reg.tournament_id)
+        if not tournament or tournament.status != TournamentStatus.COMPLETED:
+            continue
+        winner_id = _compute_tournament_winner_participant_id(tournament)
+        if winner_id != reg.participant_id:
+            continue
 
-    if not my_participant_ids:
+        participant = db.session.get(Participant, reg.participant_id)
+        if not participant or not participant.team_id:
+            continue
+        team = db.session.get(Team, participant.team_id)
+        team_name = team.name if team else None
+
+        achievement = {
+            "tournament_id": tournament.id,
+            "tournament_name": tournament.name,
+            "sport": tournament.sport,
+            "format": tournament.format.value,
+            "team_id": participant.team_id,
+            "team_name": team_name,
+        }
+        if player.team_id and participant.team_id == player.team_id:
+            current_team_achievements.append(achievement)
+        else:
+            previous_team_achievements.append(achievement)
+
+    return {
+        "individual": individual_achievements,
+        "current_team": current_team_achievements,
+        "previous_team": previous_team_achievements,
+    }
+
+
+def get_team_achievements(team_id: int) -> list:
+    """All completed tournaments this team's Participant record has won,
+    regardless of current roster — used for the team's own achievement list."""
+    from app.models import Tournament, TournamentParticipant
+    from app.constants.enums import TournamentStatus
+
+    participant = Participant.query.filter_by(type=ParticipationType.TEAM, team_id=team_id).first()
+    if not participant:
         return []
 
     achievements = []
-    completed_tournaments = Tournament.query.filter_by(status=TournamentStatus.COMPLETED).all()
-
-    for tournament in completed_tournaments:
-        registration = TournamentParticipant.query.filter(
-            TournamentParticipant.tournament_id == tournament.id,
-            TournamentParticipant.participant_id.in_(my_participant_ids),
-        ).first()
-        if not registration:
+    registrations = TournamentParticipant.query.filter_by(participant_id=participant.id).all()
+    for reg in registrations:
+        tournament = db.session.get(Tournament, reg.tournament_id)
+        if not tournament or tournament.status != TournamentStatus.COMPLETED:
             continue
-
-        winner_participant_id = None
-
-        if tournament.format == TournamentFormat.ROUND_ROBIN:
-            from app.services.standings_service import list_standings
-            standings = list_standings(tournament.id)
-            if standings:
-                winner_participant_id = standings[0][0].participant_id
-        else:  # KNOCKOUT
-            matches = Match.query.filter_by(tournament_id=tournament.id).all()
-            if matches:
-                def round_num(m):
-                    import re
-                    match_obj = re.match(r"Round (\d+)", m.round)
-                    return int(match_obj.group(1)) if match_obj else 0
-                final_round = max(round_num(m) for m in matches)
-                final_matches = [m for m in matches if round_num(m) == final_round]
-                if final_matches:
-                    result = MatchResult.query.filter_by(match_id=final_matches[0].id).first()
-                    if result:
-                        winner_participant_id = result.winner_participant_id
-
-        if winner_participant_id in my_participant_ids:
-            winning_participant = db.session.get(Participant, winner_participant_id)
-            team_name = None
-            if winning_participant and winning_participant.team_id:
-                from app.models import Team
-                team = db.session.get(Team, winning_participant.team_id)
-                team_name = team.name if team else None
-
+        winner_id = _compute_tournament_winner_participant_id(tournament)
+        if winner_id == participant.id:
             achievements.append({
                 "tournament_id": tournament.id,
                 "tournament_name": tournament.name,
                 "sport": tournament.sport,
                 "format": tournament.format.value,
-                "participant_type": tournament.participant_type.value,
-                "team_name": team_name,
             })
-
     return achievements

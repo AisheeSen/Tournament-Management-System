@@ -13,10 +13,12 @@ from .standing import Standing
 from .token_blocklist import TokenBlocklist
 from .password_reset_token import PasswordResetToken
 from .email_verification_token import EmailVerificationToken
+from .tournament_participant_member import TournamentParticipantMember
 
 __all__ = [
     "User", "Team", "Player", "Venue", "Tournament",
     "Participant", "TournamentParticipant", "Match", "MatchParticipant",
     "MatchResult", "MatchScore", "Standing",
     "TokenBlocklist", "PasswordResetToken", "EmailVerificationToken",
+    "TournamentParticipantMember"
 ]

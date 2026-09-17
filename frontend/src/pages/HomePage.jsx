@@ -58,7 +58,7 @@ export default function HomePage() {
           placeholder="Search by name or sport..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="bg-sidebar text-text-primary placeholder-text-secondary rounded-full px-5 py-2 w-72 outline-none focus:ring-2 focus:ring-accent"
+          className="bg-sidebar text-text-primary placeholder-text-secondary rounded-full px-5 py-2 w-[32rem] max-w-full outline-none focus:ring-2 focus:ring-accent"
         />
       </div>
 

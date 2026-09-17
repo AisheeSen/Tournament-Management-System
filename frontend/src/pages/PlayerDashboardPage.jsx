@@ -37,7 +37,12 @@ export default function PlayerDashboardPage() {
     <AppShell>
       <div className="bg-gradient-to-r from-bg-secondary to-accent rounded-3xl p-8 mb-8 flex justify-between items-center flex-wrap gap-4">
         <div>
-          <h1 className="text-3xl text-text-primary">Hello, {user?.name}</h1>
+          <h1 className="text-3xl text-text-primary">
+            Hello,{' '}
+            <Link to={`/players/${user?.player_id}/profile`} className="underline hover:opacity-80">
+              {user?.name}
+            </Link>
+          </h1>
           <p className="text-text-secondary mt-2">
             Your tournaments, upcoming and past.
             {user?.team_name && (

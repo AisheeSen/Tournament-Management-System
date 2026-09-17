@@ -17,7 +17,7 @@ export default function Sidebar() {
   }
 
   return (
-    <div className="w-20 bg-sidebar h-screen flex flex-col items-center py-6 gap-8 fixed left-0 top-0">
+    <div className="w-20 bg-sidebar h-[92vh] flex flex-col items-center py-6 gap-8 fixed left-4 top-[4vh] rounded-full">
       <Link to="/" className="text-text-primary text-2xl">🏆</Link>
 
       <Link

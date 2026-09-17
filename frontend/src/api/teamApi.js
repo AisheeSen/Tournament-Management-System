@@ -7,3 +7,7 @@ export function listTeams(page = 1, perPage = 100) {
 export function getTeam(id) {
   return client.get(`/teams/${id}`);
 }
+
+export function getTeamAchievements(id) {
+  return client.get(`/teams/${id}/achievements`);
+}

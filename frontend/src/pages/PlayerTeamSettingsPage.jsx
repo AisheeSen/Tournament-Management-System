@@ -9,6 +9,7 @@ import { listTeams } from '../api/teamApi';
 import { getErrorMessage } from '../utils/errorMessage';
 import { useAuth } from '../hooks/useAuth';
 import { Link } from 'react-router-dom';
+import ConfirmDialog from '../components/common/ConfirmDialog';
 
 export default function PlayerTeamSettingsPage() {
   const { user } = useAuth();
@@ -18,6 +19,7 @@ export default function PlayerTeamSettingsPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -92,27 +94,49 @@ export default function PlayerTeamSettingsPage() {
         <div className="mb-4">
           <label className="block text-text-secondary text-sm mb-2">Join a different team</label>
           <select
-            className="w-full bg-transparent border-b border-text-secondary text-text-primary py-2 outline-none focus:border-accent"
+            className="w-full bg-transparent border-b border-text-secondary text-text-primary py-2 outline-none focus:border-accent disabled:opacity-40 disabled:cursor-not-allowed"
             value={selectedTeamId}
             onChange={(e) => setSelectedTeamId(e.target.value)}
+            disabled={!!user?.team_id}
           >
             <option value="" className="bg-card">No team</option>
-            {teams.map((t) => (
-              <option key={t.id} value={t.id} className="bg-card">{t.name}</option>
-            ))}
+            {teams
+              .filter((t) => t.id !== user?.team_id)
+              .map((t) => (
+                <option key={t.id} value={t.id} className="bg-card">{t.name}</option>
+              ))}
           </select>
+          {user?.team_id && (
+            <p className="text-text-secondary text-xs mt-1">
+              Leave your current team before joining a different one.
+            </p>
+          )}
         </div>
 
         <div className="flex gap-3">
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving...' : 'Save'}
-          </Button>
+          {!user?.team_id && (
+            <Button onClick={handleSave} disabled={saving || !selectedTeamId}>
+              {saving ? 'Saving...' : 'Save'}
+            </Button>
+          )}
           {user?.team_id && (
-            <Button variant="secondary" onClick={handleLeaveTeam} disabled={saving}>
+            <Button variant="secondary" onClick={() => setConfirmLeave(true)} disabled={saving}>
               Leave Current Team
             </Button>
           )}
         </div>
+        <ConfirmDialog
+          open={confirmLeave}
+          title="Leave team?"
+          message={`Are you sure you want to leave your current team "${user?.team_name}"?`}
+          confirmLabel="Leave Team"
+          loading={saving}
+          onCancel={() => setConfirmLeave(false)}
+          onConfirm={async () => {
+            await handleLeaveTeam();
+            setConfirmLeave(false);
+          }}
+        />
       </Card>
     </AppShell>
   );

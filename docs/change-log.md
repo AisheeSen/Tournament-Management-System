@@ -11,6 +11,52 @@ SRS's own §18 Change History table lists them in, not confirmed calendar dates.
 
 ---
 
+## CR-009 — Roster-snapshot-based achievement attribution
+
+**Date:** 2026-09-16 (per migration `baf2dc1bd3bd`'s creation timestamp — the one CR in
+this log with a directly evidenced date, unlike CR-004–008 above).
+
+**Reason:** CR-008 shipped player achievements with a documented known limitation:
+team-based wins were matched against whichever team a player *currently* belongs to,
+not the roster at the time the tournament was actually won. In practice this meant a
+player's win history silently rewrote itself on every team change — losing credit for
+a real win the moment they left that team, and gaining undeserved credit for a team's
+past win the moment they joined it. This was flagged in the original SRS as a
+deliberate simplification, but was raised again during a later review as worth fixing
+properly rather than leaving as a permanent limitation.
+
+**Added:**
+- `TournamentParticipantMember` table (migration `baf2dc1bd3bd`) — one row per team
+  member, written at the moment a `team_id` is registered into a tournament. A
+  point-in-time roster snapshot that is never updated afterward, regardless of later
+  roster changes.
+- `register_participant()` (`app/services/participant_service.py`) now writes these
+  snapshot rows immediately after creating a `TEAM` registration.
+- `get_player_achievements()` rewritten: return shape changed from a flat list to
+  `{"individual": [...], "current_team": [...], "previous_team": [...]}`. Team
+  achievements are now resolved via the snapshot rather than the player's live
+  `team_id`, then bucketed into `current_team`/`previous_team` by comparing the
+  winning team against the player's team *today*.
+- `get_team_achievements()` (new) + `GET /teams/{id}/achievements` (public) — a
+  team's own win history, independent of any individual player's roster status.
+- `_compute_tournament_winner_participant_id()` — the round-robin/knockout
+  winner-resolution logic, factored out of `get_player_achievements()` so both it and
+  the new `get_team_achievements()` share one implementation instead of duplicating it.
+
+**Breaking change, noted rather than versioned:** `GET /players/{id}/profile`'s
+`achievements` field changed shape (list → object with three keys). No API version
+bump accompanied this, since the only consumer is this project's own frontend, which
+was updated in the same change; a project consuming this endpoint externally would
+need to adjust.
+
+**Affected SRS sections:** §2.2 (Player), §7.5 (registration-time snapshot), §8.5
+(new table), §12.3 (rewritten), §12.3a (new endpoint), §13 (limitation removed), §1.3
+(out-of-scope item removed, since it's now implemented)
+
+**Status:** Approved and implemented.
+
+---
+
 ## CR-008 — Player achievements and public player profile
 
 **Reason:** No way for a player, or anyone else, to see a player's tournament-win
@@ -141,6 +187,9 @@ explicit index.
   `EmailVerificationToken.user_id` (migration `eb030e9e4708`), found during the P2
   manual integration-testing pass when deleting a user raised a raw FK-violation error;
   folded into this CR as it's the same "hardening pass" category of fix
+- `player_id`/`team_id` added to `StandingSchema` alongside the existing
+  `participant_id`/`name`, matching the same linking pattern already applied to
+  match and participant responses
 
 **Affected SRS sections:** §2.3 (Ownership Enforcement), §7.3 (Participant Removal),
 §7.4 (Player-Team Update), §8.3 (Indexes), §8.4 (Cascade Deletes)

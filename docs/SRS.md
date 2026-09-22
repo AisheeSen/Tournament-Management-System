@@ -1,3 +1,13 @@
+# Software Requirements Specification
+## Tournament Management System (TMS)
+
+**Status:** Baselined. Changes tracked in `docs/change-log.md`.
+**Last updated:** 2026-09-16 (incorporates CR-001 through CR-009)
+
+---
+
+## 1. Introduction
+
 ### 1.1 Purpose
 This document specifies the functional and non-functional requirements for the
 Tournament Management System (TMS), a web-based application for creating, configuring,
@@ -19,7 +29,6 @@ Tournament with no fixed list — the backend places no restriction on its value
 - Pagination on tournament-scoped lists (participants, matches, standings) — naturally
   bounded by tournament size
 - File/image upload (no tournament cover images, no attachments)
-- Historical team-roster tracking for achievement attribution (see §12.3)
 
 These may be documented as future enhancements but are not implemented in this version.
 
@@ -37,7 +46,7 @@ An unauthenticated visitor. Can, without logging in or registering:
 
 Cannot perform any write action.
 
-### 2.2 Player *(CR-002, CR-007, CR-008)*
+### 2.2 Player *(CR-002, CR-007, CR-008, CR-009)*
 Everything a Guest can do, plus, once registered and logged in:
 - register their own `Player` profile as part of account registration (§7.1)
 - self-register as a participant in `INDIVIDUAL` tournaments only (§7.5) — cannot
@@ -46,7 +55,8 @@ Everything a Guest can do, plus, once registered and logged in:
 - view their own profile (`GET /auth/me`) and their own tournament history
   (`GET /auth/me/tournaments`)
 - view their own or any player's public profile, including tournament-win
-  achievements (§12.3)
+  achievements correctly attributed to the team they were actually on at the time
+  (§12.3, CR-009), and any team's own win history (§12.3a)
 - log out (revokes their current session token — see §9.2)
 - request a password reset if forgotten
 
@@ -253,8 +263,13 @@ player's team affiliation receives `403`.
 
 Team registration is therefore organizer-managed in all cases — there is no
 self-service path for a player to commit an entire team's roster to a tournament,
-since no "team captain" concept exists in the data model (see §12.3 for the related
-limitation this implies for achievement tracking).
+since no "team captain" concept exists in the data model.
+
+When a `team_id` is registered (by an Organizer), the system snapshots the team's
+current roster into `TournamentParticipantMember` rows at that moment — one per
+current member — so achievement attribution can later be resolved against *who was
+actually on the team when it registered*, not whoever happens to be on the team when
+someone later looks up an achievement (§12.3, CR-009).
 
 ---
 
@@ -304,6 +319,19 @@ reset/verification tokens rather than raising a foreign-key violation. No other
 relationship in the schema cascades on delete; deleting a `Tournament`, `Match`, or
 similar core entity with dependent records is intentionally blocked, to avoid silent
 loss of tournament history.
+
+### 8.5 Tournament Participant Roster Snapshot *(CR-009)*
+| Column | Type | Constraint |
+|---|---|---|
+| id | Integer | PK |
+| tournament_participant_id | Integer | FK → TournamentParticipant.id, NOT NULL, indexed |
+| player_id | Integer | FK → Player.id, NOT NULL, indexed |
+| created_at | DateTime (tz-aware) | NOT NULL |
+
+Unique on `(tournament_participant_id, player_id)`. One row is written per current
+team member at the moment a `team_id` is registered into a tournament (§7.5) — a
+point-in-time roster snapshot, never updated afterward regardless of later roster
+changes. See §12.3 for how this is used.
 
 ---
 
@@ -457,30 +485,52 @@ accepts `?status=DRAFT|REGISTRATION_OPEN|ONGOING|COMPLETED` for filtering.
   alongside the display `name`, so clients can link to a player's public profile or a
   team's roster without a separate lookup.
 
-### 12.3 Player Achievements & Public Profile *(CR-008)*
+- `GET /tournaments/{id}/standings` rows include `player_id`/`team_id` alongside
+  `participant_id` and `name`, for the same client-side linking purpose.
+
+### 12.3 Player Achievements & Public Profile *(CR-008, CR-009)*
 `GET /players/{id}/profile` (public) returns:
 ```json
 {
   "id": 7, "name": "...", "team_id": 3, "team_name": "...",
-  "achievements": [
-    {"tournament_id": 12, "tournament_name": "...", "sport": "...", "format": "..."}
-  ]
+  "achievements": {
+    "individual": [
+      {"tournament_id": 12, "tournament_name": "...", "sport": "...", "format": "..."}
+    ],
+    "current_team": [
+      {"tournament_id": 9, "tournament_name": "...", "sport": "...", "format": "...",
+       "team_id": 3, "team_name": "..."}
+    ],
+    "previous_team": [
+      {"tournament_id": 4, "tournament_name": "...", "sport": "...", "format": "...",
+       "team_id": 1, "team_name": "..."}
+    ]
+  }
 }
 ```
 An "achievement" is a `COMPLETED` tournament this player won — either as the
-round-robin standings leader, or as the knockout final's recorded winner — matched
-against either the player's own individual `Participant` record or their **current**
-team's `Participant` record.
+round-robin standings leader, or as the knockout final's recorded winner.
+`individual` achievements are matched against the player's own individual
+`Participant` record. Team achievements are matched only against tournaments where a
+`TournamentParticipantMember` snapshot row (§8.5) proves this specific player was
+actually on that team's roster when it registered — never against a team's wins in
+general. Each such achievement is then classified as `current_team` if the winning
+team is still the player's team today, or `previous_team` if the player has since
+moved to a different team (or left team play entirely). A player who joins a team
+*after* it won something gains no credit for that win, since no snapshot row ties
+them to that registration — this was the exact failure mode of the pre-CR-009
+approach (see the change log for the full before/after).
 
-**Known limitation, explicitly documented rather than silently incorrect:** the
-system does not track historical team rosters. A player's team-based achievements are
-computed against whichever team they currently belong to at the time the profile is
-viewed — if a player has since left the team that won a tournament, that win is no
-longer credited to them; conversely, if a player joins a team after it won something,
-that historical win *will* be credited to them. This is a deliberate simplification
-(see §1.3) rather than an oversight; a fully correct implementation would require
-snapshotting team membership at tournament-registration time, which is out of scope
-for this version.
+### 12.3a Team Achievements *(CR-009)*
+`GET /teams/{id}/achievements` (public) returns:
+```json
+{ "team_id": 3, "team_name": "...", "achievements": [
+    {"tournament_id": 9, "tournament_name": "...", "sport": "...", "format": "..."}
+] }
+```
+All `COMPLETED` tournaments this team's own `Participant` record has won, independent
+of roster history or of any individual player's current affiliation — this is the
+team's own win history, unaffected by who has since joined or left.
 
 ### 12.4 Standard Error Responses
 | Code | Meaning |
@@ -519,7 +569,6 @@ Response body: `{ "error": "<message>" }`
   - Email verification and password reset tokens are exposed directly in API
     responses in development mode only, since no SMTP provider is configured. This
     must never be enabled in a production deployment.
-  - Player achievement attribution does not track historical team rosters (§12.3).
   - No application-level locking beyond PostgreSQL's default transaction isolation;
     acceptable given the project's realistic concurrency profile (§14).
 
@@ -548,7 +597,7 @@ Business logic resides in the service layer, not in route functions.
 
 ## 16. Testing Summary
 
-- **113 automated tests** (pytest), covering models, services, and routes across every
+- **116 automated tests** (pytest), covering models, services, and routes across every
   functional requirement, change request, and hardening fix described in this document.
 - **2 manual end-to-end integration scenarios** run against the live API (documented in
   `backend/scripts/scenario_a.ps1`, `scenario_b.ps1`): a full round-robin lifecycle and
@@ -557,8 +606,9 @@ Business logic resides in the service layer, not in route functions.
   fixes for: a missing FK cascade, an overly strict rate limit, a broken migration
   downgrade, a missing organizer-ownership check on three services, orphaned standings
   rows after participant removal, the ability to start a tournament with too few
-  participants, the ability to submit an unscheduled match's result, and the ability
-  to schedule a match in the past — see `docs/change-log.md` for full detail per CR.
+  participants, the ability to submit an unscheduled match's result, the ability
+  to schedule a match in the past, and incorrect achievement attribution after a
+  player changed teams — see `docs/change-log.md` for full detail per CR.
 
 ---
 
@@ -587,3 +637,4 @@ See `docs/change-log.md` for full narrative detail on each entry.
 | CR-006 | Minimum two participants required to start a tournament | Approved, implemented |
 | CR-007 | Player self-registration restricted to `INDIVIDUAL` tournaments only; team registration remains organizer-only in all cases | Approved, implemented |
 | CR-008 | Player achievements and public player profile | Approved, implemented |
+| CR-009 | Roster-snapshot-based achievement attribution: team achievements are matched against who was actually on the team's roster at registration time, not the player's current team; adds `GET /teams/{id}/achievements` | Approved, implemented |

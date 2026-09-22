@@ -38,13 +38,14 @@ requirements specification.
 
 ## Backend Status
 
-**Complete.** All functional requirements (FR-01–FR-07) and all eight change requests
+**Complete.** All functional requirements (FR-01–FR-07) and all nine change requests
 (CR-001 guest access, CR-002 player self-registration, CR-003 auth hardening, CR-004
 post-build hardening, CR-005 match scheduling, CR-006 minimum participants, CR-007
-individual-only self-registration, CR-008 player achievements/profile) are
-implemented, covered by 113 automated tests, and additionally verified through two
-manual end-to-end integration scenarios against the live API. See
-`docs/traceability-matrix.md` for the full requirement-to-implementation mapping.
+individual-only self-registration, CR-008 player achievements/profile, CR-009
+roster-snapshot achievement attribution) are implemented, covered by 116 automated
+tests, and additionally verified through two manual end-to-end integration scenarios
+against the live API. See `docs/traceability-matrix.md` for the full
+requirement-to-implementation mapping.
 
 **Frontend:** Also complete — a React (Vite) SPA under `frontend/` covering guest
 browsing, player/organizer auth, tournament management, participant registration,
@@ -57,6 +58,16 @@ fixtures, results entry, and standings.
 ```
 tournament-management-system/
 ├── frontend/
+│   ├── src/
+│   │   ├── pages/        # Route-level views (23 pages)
+│   │   ├── components/   # auth/, common/, layout/, tournament/
+│   │   ├── api/          # One module per backend resource (axios)
+│   │   ├── context/      # AuthContext
+│   │   ├── hooks/
+│   │   └── utils/
+│   ├── public/
+│   ├── package.json
+│   └── vite.config.js
 ├── backend/
 │   ├── app/
 │   │   ├── routes/       # HTTP endpoints
@@ -156,12 +167,47 @@ Always run from inside `backend/`:
 ```bash
 python -m pytest -v
 ```
-Expect all 113 tests to pass.
+Expect all 116 tests to pass.
 
 ### 10. Manual integration test scripts (optional)
 `backend/scripts/scenario_a.ps1` (round-robin) and `scenario_b.ps1` (knockout) run a
 full lifecycle against the live server via real HTTP calls. `cleanup_integ_data.sql`
 removes the test data they create. Requires the server running in a separate terminal.
+
+---
+
+## Frontend Setup
+
+### 1. Prerequisites
+- Node.js (LTS recommended)
+
+### 2. Enter the frontend directory and install dependencies
+```bash
+cd tournament-management-system/frontend
+npm install
+```
+
+### 3. Configure environment variables
+```bash
+cp .env.example .env
+```
+Fill in `frontend/.env`:
+```
+VITE_API_BASE_URL=http://localhost:5000/api/v1
+```
+
+### 4. Run the dev server
+```bash
+npm run dev
+```
+Confirm it's serving on `http://localhost:5173` — this must match one of the
+backend's `CORS_ORIGINS` values (§6 above already includes it by default), or
+requests will be blocked by the browser.
+
+### 5. Full local run
+With both the backend (`flask --app run.py run`, port 5000) and frontend
+(`npm run dev`, port 5173) running simultaneously in separate terminals, open
+`http://localhost:5173` to use the application.
 
 ---
 
@@ -206,9 +252,10 @@ record is created automatically; organizers never create Player/Team records.
 | `/players` | GET | **Public** | Paginated |
 | `/players/{id}` | GET | **Public** | |
 | `/players/{id}/team` | PUT | Player (self) or Organizer | Set `team_id: null` to leave a team |
-| `/players/{id}/profile` | GET | **Public** | Includes tournament-win achievements (CR-008) |
+| `/players/{id}/profile` | GET | **Public** | `achievements` is `{individual, current_team, previous_team}`, matched via roster snapshots taken at registration time (CR-008, CR-009) |
 | `/teams` | GET | **Public** | Paginated |
 | `/teams/{id}` | GET | **Public** | |
+| `/teams/{id}/achievements` | GET | **Public** | Team's own win history, independent of current roster (CR-009) |
 
 ### Participants, Fixtures, Results, Standings
 | Endpoint | Method | Auth | Notes |
@@ -222,7 +269,7 @@ record is created automatically; organizers never create Player/Team records.
 | `/matches/{id}/schedule` | PUT | Organizer (owner) | Sets `venue_id`/`scheduled_at`; rejects past dates (CR-005) |
 | `/matches/{id}/result` | POST | Organizer (owner) | Transactional; organizer-only, no player path; requires venue + schedule set (CR-005) |
 | `/matches/{id}/result` | GET | **Public** | |
-| `/tournaments/{id}/standings` | GET | **Public** | Ordered: points → score diff → total score → name |
+| `/tournaments/{id}/standings` | GET | **Public** | Ordered: points → score diff → total score → name; rows include `player_id`/`team_id` for linking |
 
 ### Automatic tournament completion
 The tournament transitions to `COMPLETED` automatically — no explicit organizer
@@ -264,10 +311,6 @@ round-robin match's result is submitted.
 - `TokenBlocklist` entries are not purged automatically on a schedule; a
   `TokenBlocklist.purge_expired()` utility exists but must be invoked manually or from
   a future maintenance job.
-- Player achievement attribution (`/players/{id}/profile`) does not track historical
-  team rosters — a team-based tournament win is credited against whichever team a
-  player currently belongs to, not the roster at the time the tournament was won. See
-  `docs/SRS.md` §12.3 for the full rationale.
 
 ---
 

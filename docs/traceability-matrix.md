@@ -3,8 +3,8 @@
 This matrix links each functional requirement to its design artifact, implementation
 file, and test file, per SRS §43. Updated as each feature is completed.
 
-**Last synced with:** `docs/SRS.md`, "Last updated: 2026-09-04 (incorporates CR-001
-through CR-008)."
+**Last synced with:** `docs/SRS.md`, "Last updated: 2026-09-16 (incorporates CR-001
+through CR-009)."
 
 **Status legend:** ✅ Done · 🟡 In progress · ⬜ Not started
 
@@ -37,6 +37,7 @@ through CR-008)."
 | CR-006 | Minimum two participants required before `REGISTRATION_OPEN → ONGOING` | `tournament_service.py::advance_lifecycle()` — participant-count check when `target_status == ONGOING` | `test_tournaments.py::test_cannot_start_with_fewer_than_two_participants` | ✅ |
 | CR-007 | Player self-registration restricted to `INDIVIDUAL` tournaments only; team registration remains organizer-only in all cases | `participant_service.py::register_participant()` — `PLAYER` role branch (self-only, `INDIVIDUAL`-only, no `team_id`) | `test_participants.py::test_player_can_self_register_for_individual_tournament`, `::test_player_cannot_self_register_for_team_tournament`, `::test_player_cannot_register_someone_else`, `::test_player_cannot_register_a_team` | ✅ |
 | CR-008 | Player achievements and public player profile | `participant_service.py::get_player_achievements()`, `player_routes.py::get_player_profile()` (`GET /players/{id}/profile`) | `test_gaps_round2.py::test_player_profile_shows_achievement_after_winning` | ✅ |
+| CR-009 | Roster-snapshot achievement attribution: team wins matched against who was actually on the roster at registration time, not the player's current team; adds `GET /teams/{id}/achievements` | `models/tournament_participant_member.py` (new table, migration `baf2dc1bd3bd`), `participant_service.py::register_participant()` (snapshot write), `::get_player_achievements()` (rewritten — dict shape `{individual, current_team, previous_team}`), `::get_team_achievements()` (new), `team_routes.py::get_team_achievements_route()` | `test_gaps_round2.py::test_achievement_includes_participant_type_and_team_name`, `::test_team_switch_reclassifies_achievement_correctly` | ✅ |
 
 ## Post-Build Hardening (Codebase Gap Review) — detail for CR-004
 
@@ -51,6 +52,7 @@ through CR-008)."
 | 7 | CORS wide open (`origins: "*"`) | `CORS_ORIGINS` env-driven allowlist | Manual verification | ✅ |
 | 8 | Inconsistent score serialization (string vs number) | Standardized on plain floats across `MatchResultSchema`, `StandingSchema` | Covered by existing result/standings tests | ✅ |
 | 9 | No explicit indexes on FK columns | `index=True` added to all FK columns across 8 models; migration `c49a02e1137e` | N/A (performance, not behavior) | ✅ |
+| 10 | Standings responses lacked `player_id`/`team_id`, so names couldn't be linked to profiles/rosters the way match/participant names could | `player_id`/`team_id` added to `StandingSchema`, sourced via `standing.participant` | `test_standings_include_player_id_for_linking` | ✅ |
 
 ## P1 — Polish (SRS §38, §39)
 
@@ -86,12 +88,12 @@ tracked formally under CR-004; the second under the CR-003 addendum in
 
 ## Summary
 
-All functional requirements (FR-01–FR-07) and all eight change requests (CR-001–CR-008)
-are complete. **113 automated tests passing**, plus 2 manual end-to-end integration
+All functional requirements (FR-01–FR-07) and all nine change requests (CR-001–CR-009)
+are complete. **116 automated tests passing**, plus 2 manual end-to-end integration
 scenarios verified against the live API. Known limitations (in-memory rate limiting,
-unscheduled blocklist purging, dev-only token exposure, non-historical team-roster
-achievement attribution) are documented in `docs/SRS.md` §1.3 and §13 rather than
-treated as open defects.
+unscheduled blocklist purging, dev-only token exposure) are documented in
+`docs/SRS.md` §13 rather than treated as open defects. The previously-documented
+non-historical team-roster achievement limitation was resolved by CR-009.
 
 ## Remaining before final submission
 
@@ -106,3 +108,11 @@ treated as open defects.
   player/organizer auth, tournament management, participant registration, fixture and
   standings display, and match result entry (23 pages, 6 API modules, shared
   `AuthContext`). Not yet broken out into its own FR-tracked rows in this matrix.
+- **Frontend consistency regression (unrelated to CR-009):** a prior pass added a
+  shared `ParticipantLink` component so player/team names were clickable everywhere
+  in the frontend. That shared component has since been removed; most pages still
+  link names but via duplicated per-file logic instead of the shared component, and
+  two spots lost the link entirely — `ChampionBanner.jsx`'s champion name (now plain
+  text, and the round-robin branch no longer even carries `player_id`/`team_id` to
+  link with) and `TournamentManagementPage.jsx`'s "Registered participants" list. Not
+  a backend/requirements issue, but worth a cleanup pass before final submission.
